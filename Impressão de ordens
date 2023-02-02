@@ -1,0 +1,118 @@
+Sub SAP_Conectar()
+    Set SAPGuiAuto = GetObject("SAPGUI")          'Utiliza o objeto da interface gráfica do SAP
+    Set SAPApp = SAPGuiAuto.GetScriptingEngine    'Conecta ao SAP que está rodando no momento
+    Set SAPcon = SAPApp.Children(0)               'Encontra o primeiro sistema que está conectado
+    Set session = SAPcon.Children(0)              'Encontra a primeira sessão (janela) dessa conexão
+End Sub
+
+Function imprimirOrdem(numOrdem)
+
+        Call SAP_Transacao("IW32", "", "n")
+        session.findById("wnd[0]/usr/ctxtCAUFVD-AUFNR").Text = numOrdem
+        session.findById("wnd[0]").sendvkey 0
+        msgRodapeNum = session.findById("wnd[0]").Children(5).messageNumber
+        msgRodapeTxt = session.findById("wnd[0]").Children(5).Text
+ 
+        Select Case msgRodapeNum
+            Case ""
+                
+            Case "368"              'Existe documentos em anexo
+                
+            Case "161"
+                msgLOG = "Ordem não existe": GoTo proxLoop
+            Case "267"
+                msgLOG = "Ordem encerrada": GoTo proxLoop
+            Case Else
+                msgLOG = "Msg não tratada (IW32): " & msgRodapeNum: GoTo proxLoop
+        End Select
+   
+continua02:
+       
+        '# Verifica se há operações com trabalho realizado > 0
+        
+        'Aba Operações
+        session.findById("wnd[0]/usr/subSUB_ALL:SAPLCOIH:3001/ssubSUB_LEVEL:SAPLCOIH:1100/tabsTS_1100/tabpVGUE").Select
+        msgRodapeNum = session.findById("wnd[0]").Children(5).messageNumber
+        If msgRodapeNum <> "" Then msgLOG = "Erro ao selecionar a aba operações.": GoTo proxLoop
+        qtdScroll = 0
+        qtdOperImp = 0
+        
+        varNumAba = session.findById("wnd[0]/usr/subSUB_ALL:SAPLCOIH:3001").Children(0).Name
+        ID_Tabela = "wnd[0]/usr/subSUB_ALL:SAPLCOIH:3001/ssub" & varNumAba & "/tabsTS_1100/tabpVGUE/ssubSUB_AUFTRAG:SAPLCOVG:3010/tblSAPLCOVGTCTRL_3010"
+        
+        qtdLinhasScroll = session.findById(ID_Tabela).visibleRowCount - 1
+verificaOp:
+
+        For j = 0 To qtdLinhasScroll ' linhas por scroll
+            
+            numOP = session.findById(ID_Tabela & "/txtAFVGD-VORNR[0," & j & "]").Text
+            descOp = session.findById(ID_Tabela & "/txtAFVGD-LTXA1[5," & j & "]").Text
+            If descOp <> "" Then
+            trabReal = session.findById(ID_Tabela & "/txtAFVGD-ISMNW[7," & j & "]").Text
+            
+                If trabReal = 0 Then
+                    vetOperImp(qtdOperImp) = numOP
+                    qtdOperImp = qtdOperImp + 1
+                End If
+            Else
+                j = 99
+            End If
+        Next j
+        
+        If j = qtdLinhasScroll + 1 Then    'Se tiver mais que 13 operações na tela tem que rolar a página (scroll)
+            qtdScroll = qtdScroll + 1
+            session.findById(ID_Tabela).VerticalScrollbar.Position = (qtdLinhasScroll + 1) * qtdScroll
+            GoTo verificaOp
+        End If
+        'Imprimir Operações Selecionadas
+        session.findById("wnd[0]/mbar/menu[0]/menu[6]/menu[1]").Select
+        m = 0
+        qtdScroll = 0
+        qtdLinhasScroll = session.findById("wnd[1]/usr/tblSAPLCOIHTCTRL_5000").visibleRowCount - 1
+
+scrollImpressao:
+        For j = 0 To qtdLinhasScroll
+            numOP = session.findById("wnd[1]/usr/tblSAPLCOIHTCTRL_5000/txtRIPRT1-VORNR[1," & j & "]").Text
+            If numOP = vetOperImp(m) Then
+                session.findById("wnd[1]/usr/tblSAPLCOIHTCTRL_5000/chkRIPRT1-FLG_SEL[0," & j & "]").Selected = True
+                m = m + 1
+                If m = qtdOperImp Then GoTo imprime01
+            End If
+        Next j
+        
+        If j = qtdLinhasScroll + 1 Then    'Se tiver mais que 13 operações na tela tem que rolar a página (scroll)
+            qtdScroll = qtdScroll + 1
+            session.findById("wnd[1]/usr/tblSAPLCOIHTCTRL_5000").VerticalScrollbar.Position = (qtdLinhasScroll + 1) * qtdScroll
+            GoTo scrollImpressao
+        End If
+        
+imprime01:
+    session.findById("wnd[1]/tbar[0]/btn[0]").press     'Parâmetros de impressão
+    
+    If session.findById("wnd[1]/usr/tblSAPLIPRTTC_WORKPAPERS/txtWWORKPAPER-WORKPAPER[0,2]").Text <> "9092" Then
+        'qtdLinhasScroll = session.findById("wnd[1]/usr/tblSAPLIPRTTC_WORKPAPERS").verticalScrollbar.visibleRowCount - 1
+        'For i = 0 To qtdLinhasScroll
+        '
+        'Next i
+        msgLOG = "Linha do Doc.Ordem (9092) fora do padrão " & msgLOG: GoTo proxLoop
+    Else
+        session.findById("wnd[1]/usr/tblSAPLIPRTTC_WORKPAPERS/chkWWORKPAPER-PM_DELTA_P[5,2]").Selected = False  'Desmarca a coluna 'I' do Doc.Ordem 9092
+        session.findById("wnd[1]/usr/tblSAPLIPRTTC_WORKPAPERS/chkWWORKPAPER-TDIMMED[6,2]").Selected = True      'Marca a coluna 'S' do Doc.Ordem 9092
+        session.findById("wnd[1]/usr/tblSAPLIPRTTC_WORKPAPERS/chkWWORKPAPER-TDDELETE[7,2]").Selected = False    'Desmarca a coluna 'E' do Doc.Ordem 9092
+        session.findById("wnd[1]/usr/tblSAPLIPRTTC_WORKPAPERS/chkWWORKPAPER-TDNEWID[8,2]").Selected = False     'Desmarca a coluna 'N' do Doc.Ordem 9092
+        session.findById("wnd[1]/usr/tblSAPLIPRTTC_WORKPAPERS").getAbsoluteRow(2).Selected = True           'Seleciona a linha do Doc.Ordem 9092
+        session.findById("wnd[1]/usr/tblSAPLIPRTTC_WORKPAPERS/ctxtGV_TDDEST[2,2]").Text = "locl"
+        session.findById("wnd[1]").sendvkey 8                                                               'Imprime
+    End If
+    msgLOG = "OK"
+    
+imprimirOrdem_FIM:
+    If imprimeForms Then Call ImprimirForms
+    If imprimeAnexos Then Call imprimirAnexos
+proxLoop:
+     imprimirOrdem = msgLOG
+End Function
+
+'A Sub SAP_Conectar() é responsável por criar uma conexão entre o computador e o sistema SAP, utilizando a interface gráfica do SAP. Ela obtém um objeto da interface gráfica, conecta-se ao sistema rodando no momento e encontra a primeira janela de sessão (linhas 1-4). 
+
+'A Função imprimirOrdem(numOrdem) tem como objetivo imprimir as operações associadas à ordem passada como parâmetro. Primeiro ela chama outra função (SAP_Transacao) para entrar na transação IW32. Então, ela verifica se a ordem existe e, caso não exista ou esteja encerrada, retorna um erro (linhas 12-17). Se a ordem existir, é verificado se há operações com trabalho realizado maior que zero (linhas 19-40), pois só essas operações serão impressas. Em seguida, é iniciada uma tela de impressão dessas operações (linhas 42-54). Por fim, é verificado se o documento de ordem (9092) está configurado corretamente para impressão e a ordem é finalmente imprimida (linhas 56-63). Caso haja algum erro, a função retorna um código de erro (linha 65).
